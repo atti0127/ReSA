@@ -27,6 +27,7 @@ def get_adapter_metadata(args):
         'image_anchor_weight': getattr(args, 'image_anchor_weight', 0.),
         'text_anchor_weight': getattr(args, 'text_anchor_weight', 0.),
         'prototype_anchor_weight': getattr(args, 'prototype_anchor_weight', 0.),
+        'prototype_scope': 'train_classes_only',
         'mrsa': getattr(args, 'mrsa', False),
         'mrsa_projection': (
             'signed_hadamard_subspace'
@@ -366,6 +367,17 @@ def load_lora(args, list_lora_layers):
         raise ValueError(
             f"Prototype anchor weight mismatch: expected {expected_prototype_anchor}, "
             f"found {stored_prototype_anchor}")
+    stored_prototype_scope = metadata.get('prototype_scope')
+    expected_prototype_scope = 'train_classes_only'
+    if stored_prototype_scope != expected_prototype_scope:
+        is_unsafe_legacy_checkpoint = (
+            expected_setting == 'base2new'
+            and expected_prototype_anchor > 0.)
+        if is_unsafe_legacy_checkpoint or stored_prototype_scope is not None:
+            raise ValueError(
+                'Prototype scope mismatch: expected '
+                f'{expected_prototype_scope}, found '
+                f'{stored_prototype_scope or "legacy_unspecified"}')
     stored_mrsa = metadata.get('mrsa', False)
     expected_mrsa = getattr(args, 'mrsa', False)
     if stored_mrsa != expected_mrsa:
