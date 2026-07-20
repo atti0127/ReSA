@@ -10,7 +10,12 @@ from datasets.base_to_novel import (
     configure_class_split,
 )
 from datasets.utils import DatasetBase, Datum
-from lora import harmonic_mean, resolve_test_loaders
+from lora import (
+    class_prototype_memory_loss,
+    get_training_prototype_classnames,
+    harmonic_mean,
+    resolve_test_loaders,
+)
 from loralib.utils import get_adapter_save_dir
 
 
@@ -38,6 +43,48 @@ class FakeImageDataset(Dataset):
 
 
 class BaseToNovelTest(unittest.TestCase):
+    def test_training_prototype_bank_never_reads_novel_classnames(self):
+        class StrictTrainingDataset:
+            classnames = ['base_0', 'base_1']
+
+            @property
+            def test_new_classnames(self):
+                raise AssertionError('novel vocabulary was accessed')
+
+        self.assertEqual(
+            get_training_prototype_classnames(StrictTrainingDataset()),
+            ['base_0', 'base_1'])
+
+    def test_prototype_loss_rejects_non_training_class_bank(self):
+        image_features = torch.nn.functional.normalize(
+            torch.randn(3, 8), dim=-1)
+        frozen_image_features = torch.nn.functional.normalize(
+            torch.randn(3, 8), dim=-1)
+        frozen_text_features = torch.nn.functional.normalize(
+            torch.randn(4, 8), dim=-1)
+
+        with self.assertRaisesRegex(ValueError, 'training classes only'):
+            class_prototype_memory_loss(
+                image_features=image_features,
+                frozen_image_features=frozen_image_features,
+                adapted_text_features=None,
+                frozen_text_features=frozen_text_features,
+                num_train_classes=2)
+
+    def test_prototype_loss_rejects_extra_adapted_text_rows(self):
+        frozen_text_features = torch.nn.functional.normalize(
+            torch.randn(2, 8), dim=-1)
+        adapted_text_features = torch.nn.functional.normalize(
+            torch.randn(4, 8), dim=-1)
+
+        with self.assertRaisesRegex(ValueError, 'training classes only'):
+            class_prototype_memory_loss(
+                image_features=None,
+                frozen_image_features=None,
+                adapted_text_features=adapted_text_features,
+                frozen_text_features=frozen_text_features,
+                num_train_classes=2)
+
     def test_datum_dataset_uses_coop_half_split_and_relabels(self):
         train = make_items(5)
         source = DatasetBase(

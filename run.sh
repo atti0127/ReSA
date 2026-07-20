@@ -23,9 +23,9 @@ for dataset in "${datasets[@]}"; do
           --image_anchor_weight 1.0 \
           --text_anchor_weight 1.0 \
           --prototype_anchor_weight 1.0 \
-          --v_rpr \
+          --dp_vrpr \
           --mrsa \
-          --save_path "results/output_mrsa2"
+          --save_path "results/output_mrsa_new"
       done
     done
   done

@@ -222,12 +222,9 @@ def build_class_prompts(classnames, template):
     ]
 
 
-def get_prototype_classnames(dataset, include_novel):
-    classnames = list(dataset.classnames)
-    novel_classnames = getattr(dataset, 'test_new_classnames', None)
-    if include_novel and novel_classnames is not None:
-        classnames.extend(novel_classnames)
-    return classnames
+def get_training_prototype_classnames(dataset):
+    """Return only class names that are supervised during adaptation."""
+    return list(dataset.classnames)
 
 
 def encode_frozen_text_features(clip_model, tokenized_texts):
@@ -261,23 +258,10 @@ def normalized_relation_profile_row_losses(
 
 
 def normalized_relation_profile_loss(
-        adapted_scores, frozen_scores, include_mask=None, row_weights=None):
+        adapted_scores, frozen_scores, include_mask=None):
     row_losses = normalized_relation_profile_row_losses(
         adapted_scores, frozen_scores, include_mask=include_mask)
-
-    if row_weights is None:
-        return row_losses.mean()
-    row_weights = row_weights.to(
-        device=row_losses.device, dtype=row_losses.dtype)
-    return (row_losses * row_weights).sum() / row_weights.sum().clamp_min(1.)
-
-
-def balanced_novel_row_weights(num_rows, num_train_classes, device, dtype):
-    weights = torch.ones(num_rows, device=device, dtype=dtype)
-    num_novel_classes = num_rows - num_train_classes
-    if num_train_classes > 0 and num_novel_classes > 0:
-        weights[num_train_classes:] = num_train_classes / num_novel_classes
-    return weights
+    return row_losses.mean()
 
 
 def class_prototype_memory_loss(
@@ -286,6 +270,18 @@ def class_prototype_memory_loss(
         num_train_classes):
     losses = []
     frozen_text_features = frozen_text_features.detach().float()
+    num_prototype_classes = frozen_text_features.shape[0]
+    if num_prototype_classes != num_train_classes:
+        raise ValueError(
+            'Prototype anchor must use training classes only: expected '
+            f'{num_train_classes} prototypes, found {num_prototype_classes}')
+    if (
+            adapted_text_features is not None
+            and adapted_text_features.shape[0] != num_train_classes):
+        raise ValueError(
+            'Adapted prototype text bank must use training classes only: '
+            f'expected {num_train_classes} rows, found '
+            f'{adapted_text_features.shape[0]}')
 
     if image_features is not None and frozen_image_features is not None:
         adapted_image_scores = (
@@ -306,15 +302,9 @@ def class_prototype_memory_loss(
                 frozen_text_scores.shape[0],
                 dtype=torch.bool,
                 device=frozen_text_scores.device)
-        row_weights = balanced_novel_row_weights(
-            adapted_text_scores.shape[0],
-            num_train_classes,
-            adapted_text_scores.device,
-            adapted_text_scores.dtype)
         losses.append(normalized_relation_profile_loss(
             adapted_text_scores, frozen_text_scores,
-            include_mask=include_mask,
-            row_weights=row_weights))
+            include_mask=include_mask))
 
     if not losses:
         device = frozen_text_features.device
@@ -476,9 +466,7 @@ def run_lora(
     if is_main_process(args):
         print("\nGetting textual features as CLIP's classifier.")
     textual_features = clip_classifier(dataset.classnames, dataset.template, clip_model)
-    prototype_classnames = get_prototype_classnames(
-        dataset,
-        include_novel=(prototype_anchor_weight > 0))
+    prototype_classnames = get_training_prototype_classnames(dataset)
     prototype_texts = build_class_prompts(
         prototype_classnames, dataset.template)
     prototype_tokenized_texts = clip.tokenize(prototype_texts)
@@ -486,6 +474,11 @@ def run_lora(
         clip_model, prototype_tokenized_texts)
     num_train_classes = len(dataset.classnames)
     num_prototype_classes = len(prototype_classnames)
+    if num_prototype_classes != num_train_classes:
+        raise AssertionError(
+            'Training prototype bank must contain exactly the supervised '
+            f'classes: expected {num_train_classes}, found '
+            f'{num_prototype_classes}')
     joint_embedding_dimension = textual_features.shape[0]
     mrsa_retained_dimension = (
         max(
@@ -577,6 +570,7 @@ def run_lora(
             image_anchor_weight=getattr(args, 'image_anchor_weight', 0.),
             text_anchor_weight=getattr(args, 'text_anchor_weight', 0.),
             prototype_anchor_weight=prototype_anchor_weight,
+            prototype_scope='train_classes_only',
             v_rpr=getattr(args, 'v_rpr', False),
             v_rpr_global_rank=(
                 (args.r + 1) // 2

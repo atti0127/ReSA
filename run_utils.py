@@ -69,7 +69,7 @@ def get_arguments():
     parser.add_argument('--text_anchor_weight', default=0.0, type=float,
                         help='weight for distilling adapted text features toward frozen CLIP')
     parser.add_argument('--prototype_anchor_weight', default=0.0, type=float,
-                        help='weight for prototype profile anchoring')
+                        help='weight for train-class-only prototype profile anchoring')
     parser.add_argument('--mrsa', default=False, action='store_true',
                         help='Matched Random-Subspace Adaptation: compute '
                              'training CE after applying the same structured '

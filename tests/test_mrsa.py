@@ -9,7 +9,12 @@ from lora import (
     matched_random_subspace_features,
 )
 from loralib.layers import PlainMultiheadAttentionLoRA
-from loralib.utils import get_adapter_metadata, load_lora, save_lora
+from loralib.utils import (
+    get_adapter_metadata,
+    get_adapter_save_dir,
+    load_lora,
+    save_lora,
+)
 
 
 def make_args(save_path=None, mrsa=True):
@@ -127,6 +132,7 @@ class MatchedRandomSubspaceAdaptationTest(unittest.TestCase):
         self.assertEqual(
             metadata['mrsa_projection'], 'signed_hadamard_subspace')
         self.assertEqual(metadata['mrsa_drop_rate'], 0.25)
+        self.assertEqual(metadata['prototype_scope'], 'train_classes_only')
 
     def test_checkpoint_rejects_mrsa_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -136,6 +142,21 @@ class MatchedRandomSubspaceAdaptationTest(unittest.TestCase):
             target_args = make_args(directory, mrsa=False)
             with self.assertRaisesRegex(ValueError, 'MRSA mismatch'):
                 load_lora(target_args, [make_attention()])
+
+    def test_base_to_novel_checkpoint_rejects_legacy_prototype_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = make_args(directory)
+            args.setting = 'base2new'
+            save_lora(args, [make_attention()])
+            checkpoint_path = (
+                f'{get_adapter_save_dir(args)}/{args.filename}.pt')
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            del checkpoint['metadata']['prototype_scope']
+            torch.save(checkpoint, checkpoint_path)
+
+            with self.assertRaisesRegex(
+                    ValueError, 'legacy_unspecified'):
+                load_lora(args, [make_attention()])
 
 
 if __name__ == '__main__':
